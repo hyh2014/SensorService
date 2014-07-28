@@ -1,0 +1,142 @@
+
+#include <jni.h>
+#include <utils/Log.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <errno.h>
+
+#ifndef LOGE
+#define LOGE ALOGE
+#endif
+
+#define TYPE_ACCELEROMETER 1
+#define TYPE_MAGNETIC_FIELD 2
+#define TYPE_ORIENTATION 3
+#define TYPE_GYROSCOPE 4
+
+#define ACCEL_SENSOR_DATA_DEVICE "/dev/input/event1"
+
+static int s_accel_fd = -1;
+
+// from <linux/input.h>
+struct input_event {
+    struct timeval time;
+    __u16 type;
+    __u16 code;
+    __s32 value;
+};
+
+
+
+int sendAccelEvent(int paramNum,int *pValue)
+{
+	struct input_event event;
+	int ret = 0;
+	int i = 0;
+	const int aiCodes[]={0,1,2};
+
+	if(s_accel_fd < 0){
+		return -1;
+	}
+	
+	if(paramNum <= 0 || paramNum > sizeof(aiCodes)/sizeof(int)){
+		return -1;
+	}
+
+	for(i=0; i < paramNum; i++){
+		memset(&event, 0, sizeof(event));
+	    event.type = 3;
+	    event.code = aiCodes[i];
+	    event.value = *pValue++;
+	    LOGE("CameraService:sendAccelEvent write sensor event to %s, type=%d code=%d , value=%d",ACCEL_SENSOR_DATA_DEVICE,event.type,event.code,event.value);
+	    ret = write(s_accel_fd, &event, sizeof(event));
+	    if(ret < sizeof(event)) {
+	        LOGE( "write event failed, %s\n", strerror(errno));
+	        return -1;
+	    }
+	}
+	
+    return 0;
+}
+
+int sendAccelData(int x, int y, int z)
+{
+	int aiValue[3] ;
+	aiValue[0] = x;
+	aiValue[1] = y;
+	aiValue[2] = z;
+	return sendAccelEvent(3,aiValue);
+}
+
+
+
+
+int openSensorDevice()
+{
+	if(-1 != s_accel_fd){
+		LOGE("sensor device has already opened !!!\n");
+		return -1;
+	}
+	
+	s_accel_fd = open(ACCEL_SENSOR_DATA_DEVICE, O_RDWR);
+	if(s_accel_fd < 0) {
+        LOGE( "could not open %s, %s\n", ACCEL_SENSOR_DATA_DEVICE, strerror(errno));
+        return -1;
+    }
+	return 0;
+	
+}
+
+JNIEXPORT jboolean JNICALL Java_com_external_cameraService_helper_SensorJniHelper_sendSensorEventRemote
+  (JNIEnv *env, jobject obj, jint sensorType, jint x, jint y, jint z, jint accuracy, jint timeStamp)
+{
+	int ret = 0;
+	LOGE("Java_com_external_cameraService_helper_SensorJniHelper_sendSensorEventRemote: type=%d, x=%d,y=%d,z=%d",sensorType,x,y,z);
+	switch(sensorType)
+	{
+		case TYPE_ACCELEROMETER:
+			ret = sendAccelData(x,y,z);
+			break;
+	/*		
+		case TYPE_MAGNETIC_FIELD:
+			break;
+		case TYPE_ORIENTATION:
+			break;
+		case TYPE_GYROSCOPE:
+			break;
+	*/
+		default:
+			LOGE("ERROR: unsupport sensor type:  %d \n", sensorType);
+			return JNI_FALSE;
+			
+	}
+	
+	return ret>0? JNI_TRUE : JNI_FALSE;
+}
+
+
+
+/* This function will be call when the library first be load.
+* You can do some init in the libray. return which version jni it support.
+*/
+jint JNI_OnLoad(JavaVM* vm, void* reserved) 
+{
+
+    JNIEnv* env = NULL;
+    jint result = -1;
+
+    if ((*vm)->GetEnv(vm,(void**) &env, JNI_VERSION_1_4) != JNI_OK) {
+		LOGE("ERROR: GetEnv failed\n");
+		return result;
+	}
+
+	openSensorDevice();
+
+    /* success -- return valid version number */
+    return JNI_VERSION_1_4;
+
+}
+
